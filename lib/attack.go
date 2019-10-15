@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lucas-clemente/quic-go"
+	"github.com/lucas-clemente/quic-go/h2quic"
 	"golang.org/x/net/http2"
 )
 
@@ -192,11 +194,36 @@ func HTTP2(enabled bool) func(*Attacker) {
 	}
 }
 
+func Quic(enabled bool) func(attacker *Attacker) {
+	return func(a *Attacker) {
+		if enabled {
+			roundTripper := &h2quic.RoundTripper{
+				QuicConfig: &quic.Config{
+					MaxIncomingStreams: DefaultConnections,
+					MaxIncomingUniStreams: DefaultConnections,
+				},
+				TLSClientConfig: a.client.Transport.(*http.Transport).TLSClientConfig,
+			}
+			a.client.Transport = roundTripper
+		}
+	}
+}
+
+func (a *Attacker) QuicCloseClients() {
+	roundTripper, ok := a.client.Transport.(*h2quic.RoundTripper)
+	if !ok {
+		panic("failed to asser quic round tripper")
+	}
+	if err := roundTripper.Close(); err != nil {
+		panic(err)
+	}
+}
+
 // H2C returns a functional option which enables H2C support on requests
 // performed by an Attacker
 func H2C(enabled bool) func(*Attacker) {
 	return func(a *Attacker) {
-		if tr := a.client.Transport.(*http.Transport); enabled {
+		if tr, ok := a.client.Transport.(*http.Transport); enabled && ok {
 			a.client.Transport = &http2.Transport{
 				AllowHTTP: true,
 				DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
